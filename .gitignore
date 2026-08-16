@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Environments
+.venv/
+.env
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Experiment outputs -- regenerable from a config plus a seed, so never tracked.
+# The configs in experiments/ are tracked; the runs they produce are not.
+results/
+
+# OS
+.DS_Store
