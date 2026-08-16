@@ -4,6 +4,7 @@ from faultlens.episode import Episode, Step, chain_episode
 from faultlens.infer import Attribution, explain, format_attribution
 from faultlens.network import build_network, evidence_of
 from faultlens.params import DEFAULT_PARAMS, DETECTORS, ModelParams
+from faultlens.simulate import sample_corpus, sample_episode
 
 __all__ = [
     "DEFAULT_PARAMS",
@@ -17,4 +18,6 @@ __all__ = [
     "evidence_of",
     "explain",
     "format_attribution",
+    "sample_corpus",
+    "sample_episode",
 ]
