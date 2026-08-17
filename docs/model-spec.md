@@ -11,7 +11,7 @@ Everything in this document corresponds to code:
 | §1–§3 variables and CPDs | `faultlens/network.py`, `faultlens/params.py` |
 | §4 inference | `faultlens/infer.py` (pgmpy), `faultlens/closed_form.py` (O(n)) |
 | §5 generative model | `faultlens/simulate.py` |
-| §6 learning | not yet implemented — next phase |
+| §6 learning | `faultlens/em.py`, `experiments/e1_parameter_recovery.py` |
 
 ---
 
@@ -238,25 +238,117 @@ gives ground truth for evaluation. Inference never sees `true_reliability` or
 This is why the simulator is written before anything else: on synthetic data a
 wrong answer is unambiguously a bug, not task difficulty or a parser error.
 
-## 6. Learning (next phase, not implemented here)
+## 6. Learning
 
-The basic engine uses hand-set parameters. Fitting
-$\theta = \{r_c, q_c, \alpha_j, \beta_j, \lambda\}$ from a corpus of episodes
-labelled only with $Y$ is MAP-EM on the latent $R$:
+Fit $\theta = \{r_c, q_c, \alpha_j, \beta_j, \lambda\}$ from a corpus of
+episodes labelled only with $Y$, by MAP-EM on the latent $R$.
 
-- **E-step** — for every episode compute $\gamma_i = P(R_i = \text{fail} \mid e, y)$ exactly, by §4.2.
-- **M-step** — treat $\gamma_i$ as fractional counts:
-  $\hat{\alpha_j} \propto \sum \gamma_i e_{ij}$, $\hat{\beta_j} \propto \sum (1-\gamma_i) e_{ij}$ (closed form, with Beta priors);
-  $\hat{r_c}$ from the soft counts per component type (a logistic regression on soft labels once features are switched on);
-  $q_c$ and $\lambda$ by numeric maximisation of the noisy-OR outcome likelihood.
+### 6.1 E-step
 
-The E-step produces probabilities, never hard labels — that is precisely why the
-system can learn from a terminal pass/fail bit without pretending to know the
-true step label.
+For every episode compute $\gamma_i = P(R_i = \text{fail} \mid e, y)$ exactly,
+by §4.2. Because that is $O(nm)$, the E-step is essentially free.
 
-Three failure modes to expect and diagnose: the leak absorbing everything
-($\lambda \to 1$), EM collapsing to the prior, and detectors learned
-uninformative ($\alpha_j \approx \beta_j$).
+### 6.2 M-step for the prior and the detectors
+
+Treat $\gamma_i$ as fractional counts. With Beta$(a,b)$ pseudo-counts:
+
+$$
+\hat{r}_c = \frac{\sum_{i \in c} \gamma_i + a - 1}{N_c + a + b - 2},
+\qquad
+\hat{\alpha}_j = \frac{\sum_i \gamma_i e_{ij} + a - 1}{\sum_i \gamma_i + a + b - 2},
+\qquad
+\hat{\beta}_j = \frac{\sum_i (1-\gamma_i) e_{ij} + a - 1}{\sum_i (1-\gamma_i) + a + b - 2}.
+$$
+
+These are the Dawid–Skene updates. Once features are switched on, $\hat r_c$
+becomes a logistic regression on the soft labels $\gamma_i$ instead.
+
+### 6.3 M-step for criticality and leak
+
+The plan called for numeric maximisation here, because $P(Y \mid R)$ couples all
+the steps and cannot be written as a function of the marginals $\gamma_i$ alone.
+It can be made closed form instead, by exploiting causal independence.
+
+Augment the outcome with the indicators the noisy-OR is *defined* by. Let
+
+- $Z_i = 1$ mean "step $i$ was broken **and** its fault killed the episode", which given $R_i = \text{fail}$ is Bernoulli($q_i$);
+- $Z_0 = 1$ mean "an unmodelled cause killed it", Bernoulli($\lambda$);
+- $Y = \text{fail}$ iff any $Z$ fired.
+
+This reproduces §3.3 exactly, since
+$P(Y = \text{ok} \mid R) = (1-\lambda)\prod_{i : R_i = \text{fail}}(1-q_i)$ is
+the probability that none fired. But with $Z$ filled in, the outcome likelihood
+decomposes into independent per-step Bernoulli terms, so $q_c$ and $\lambda$
+become weighted counts like everything else:
+
+$$
+\hat q_c = \frac{\sum_{i \in c} \zeta_i}{\sum_{i \in c} \gamma_i},
+\qquad
+\hat \lambda = \frac{\sum_{\text{episodes}} \zeta_0}{N_{\text{episodes}}},
+\qquad
+\zeta_i \equiv P(R_i = \text{fail},\, Z_i = 1 \mid e, y).
+$$
+
+$\hat q_c$ reads exactly as it should: *of the blame mass on this component, how
+much of it actually sank an episode.*
+
+The expectation $\zeta_i$ is closed form too. If $Z_i$ fires the episode dies
+regardless of every other variable, so nothing else needs marginalising:
+
+$$
+P(R_i = \text{fail}, Z_i = 1, e, Y = \text{fail}) = b_i\,q_i \prod_{k \neq i}(a_k + b_k) = \frac{b_i\,q_i}{a_i + b_i}\,Z_{\text{any}},
+$$
+
+and for a successful episode no $Z$ fired at all, so $\zeta_i = 0$. Dividing by
+$P(e, Y=\text{fail})$ from §4.2 gives $\zeta_i$; the same argument with the leak
+gives $\zeta_0 = \lambda Z_{\text{any}} / P(e, Y = \text{fail})$.
+
+One can check $\zeta_i \le \gamma_i$ analytically, which the implementation also
+enforces numerically.
+
+### 6.4 Why this can work at all
+
+The E-step produces probabilities, never hard labels, and the M-step consumes
+them as fractional counts. That is precisely why the system learns from a
+terminal pass/fail bit without pretending to know the true step label.
+
+Two things break the symmetry that makes unsupervised Dawid–Skene ill-posed:
+the noisy-OR link to $Y$ anchors which latent state means "fail", and
+initialising $\alpha_j > \beta_j$ starts every restart on the correct side of
+the label flip.
+
+### 6.5 Measured behaviour (E1)
+
+`experiments/e1_parameter_recovery.py`, fitting on synthetic corpora where every
+true parameter is known and only the pass/fail bit is shown to the model:
+
+| $n$ | MAE $r_c$ | MAE $q_c$ | MAE $\alpha_j$ | MAE $\beta_j$ | $\lambda$ error |
+| --- | --- | --- | --- | --- | --- |
+| 500 | 0.0059 | — | — | — | — |
+| 2000 | 0.0042 | 0.068 | 0.018 | 0.002 | 0.003 |
+| 5000 | 0.0022 | 0.053 | 0.012 | 0.001 | 0.003 |
+
+Gate: MAE $r_c < 0.05$ at 5,000 episodes. **Passed with a ~20× margin.** All 5
+restarts reach the same optimum (spread $< 10^{-3}$ of the log-likelihood), the
+log-likelihood increases monotonically, and fitting converges in 44 iterations
+and 0.3 s on a laptop.
+
+**Criticality is the weakly identified parameter, and the reason is structural.**
+$q_c$ is estimable only in proportion to how often component $c$ actually breaks:
+the worst case is the formatter ($r = 0.005$, so ~25 broken instances in 5,000
+episodes, $\hat q = 0.83$ against a true 0.99). This is a sample-size limit, not
+a modelling error, and it is benign for the product: expected damage is
+$r_c q_c$, so components whose $q_c$ is uncertain are exactly those contributing
+negligible damage. The full fix-list ranking is recovered exactly at $n = 5000$.
+
+### 6.6 Failure modes to watch for on real data
+
+None of these appeared on synthetic data, which is expected — the simulator
+generates from the model. They are what to check first when the corpus is real:
+
+1. **Leak absorbs everything** ($\lambda \to 1$) — the model reports it does not explain your failures. A finding, not a disaster.
+2. **EM collapses to the prior** — posterior equals prior for every episode; usually means the detectors carry no signal.
+3. **Detectors learned uninformative** ($\alpha_j \approx \beta_j$) — the evidence layer is dead; add detectors before touching the model.
 
 ## 7. Assumptions and limitations
 

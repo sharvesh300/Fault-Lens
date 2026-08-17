@@ -4,9 +4,9 @@ Probabilistic fault attribution for LLM agents. Given a trace and **one bit of
 supervision** — did the task succeed? — infer which component was responsible,
 as a calibrated posterior. No step-level labels, no LLM calls at inference time.
 
-This repository currently holds the **basic engine**: the Bayesian network,
-exact inference, and a synthetic simulation. Parameters are hand-set; learning
-them by MAP-EM is the next phase.
+This repository currently holds the **engine**: the Bayesian network, exact
+inference, MAP-EM, and a synthetic study showing the parameters are recoverable
+from outcome-only supervision. It has not yet met a real trace.
 
 ## Quickstart
 
@@ -65,9 +65,36 @@ faultlens/network.py      episode -> pgmpy DiscreteBayesianNetwork
 faultlens/infer.py        blame posteriors by variable elimination
 faultlens/closed_form.py  the same posteriors in O(n), no 2^n table
 faultlens/simulate.py     generative sampler = the ground-truth oracle
-tests/                    enumeration test + closed-form agreement
+faultlens/em.py           MAP-EM, closed-form throughout
+experiments/              E1 parameter recovery
+tests/                    enumeration test, closed-form agreement, recovery
 docs/model-spec.md        mathematical specification
 ```
+
+## Does the learning actually work?
+
+```bash
+uv run experiments/e1_parameter_recovery.py
+```
+
+Fits on synthetic corpora where every true parameter is known, showing the model
+nothing but one pass/fail bit per episode:
+
+| n | MAE on `r_c` | fix-list ranking |
+| --- | --- | --- |
+| 500 | 0.0059 | |
+| 2000 | 0.0042 | |
+| 5000 | **0.0022** | recovered exactly |
+
+Gate was `MAE < 0.05` at 5,000 episodes. Converges in 44 iterations and 0.3 s,
+log-likelihood monotone, all restarts reaching the same optimum.
+
+Criticality `q_c` is the weakly identified parameter — it is estimable only in
+proportion to how often a component actually breaks, so the formatter (broken
+~25 times in 5,000 episodes) is recovered poorly. That is a sample-size limit
+rather than a modelling error, and it is harmless for the fix-list: expected
+damage is `r_c · q_c`, so the components with uncertain `q_c` are exactly the
+ones contributing negligible damage.
 
 ## Tests
 
@@ -75,17 +102,23 @@ docs/model-spec.md        mathematical specification
 uv run pytest -q
 ```
 
-The two that matter:
+The three that matter:
 
 - **enumeration test** — pgmpy's answer equals brute force over all `2^n`
   assignments of `R`, to `1e-10`
 - **closed-form test** — the `O(n)` formula equals pgmpy's answer, to `1e-10`
+- **recovery test** — EM recovers the generating parameters, and the
+  log-likelihood never decreases
 
 ## What this does not do yet
 
-No parameter learning (MAP-EM), no real-trace adapters, no calibration study,
-no Langfuse write-back, no CLI. Parameters are hand-set from the design doc, so
-the numbers demonstrate the machinery, not measured reliability of any real
-agent.
+No real-trace adapters (Who&When, Langfuse), no detector implementations that
+read an actual trace, no feature-conditioned prior, no calibration study, no
+Langfuse write-back, no CLI.
+
+The important caveat: **every number here comes from data the model itself
+generated.** That makes it evidence the mathematics and the code are right, not
+evidence the model describes real agent failures. Misspecification — fitting
+data the model *cannot* represent — is the next experiment.
 
 MIT licensed.
