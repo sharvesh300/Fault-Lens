@@ -53,8 +53,13 @@ P(E_ij = 1 | R_i = ok)     = β_j                           false-positive rate
 P(Y = ok | R)              = (1 − λ) · ∏_{i: R_i=fail} (1 − q_i)    leaky noisy-OR
 ```
 
-Full derivation, including the exact O(n) closed form for the posterior:
-[`docs/model-spec.md`](docs/model-spec.md).
+Two documents, depending on what you want:
+
+- [`docs/how-it-works.md`](docs/how-it-works.md) — how the network is built from
+  a trace, worked end to end on one episode with the real arithmetic, plus the
+  intuition behind each equation
+- [`docs/model-spec.md`](docs/model-spec.md) — the compact formal reference: CPDs,
+  the exact O(n) posterior, the EM derivation, and the assumptions
 
 ## Layout
 
@@ -68,6 +73,7 @@ faultlens/simulate.py     generative sampler = the ground-truth oracle
 faultlens/em.py           MAP-EM, closed-form throughout
 experiments/              E1 parameter recovery
 tests/                    enumeration test, closed-form agreement, recovery
+docs/how-it-works.md      walkthrough: trace -> DAG -> network -> posterior
 docs/model-spec.md        mathematical specification
 ```
 

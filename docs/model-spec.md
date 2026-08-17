@@ -4,6 +4,10 @@ Mathematical formulation of the basic engine: the Bayesian network compiled per
 episode, its conditional distributions, exact inference, and the derivation of
 the closed form that inference is checked against.
 
+> New to the model? Read [`how-it-works.md`](how-it-works.md) first — it follows
+> one episode from raw trace to blame posterior with the arithmetic worked out
+> and an intuition for each piece. This document is the compact reference.
+
 Everything in this document corresponds to code:
 
 | Section | Code |
